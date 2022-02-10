@@ -28,7 +28,6 @@ def process_batch(batch, model, device, pad_vaule):
     E_ed, V, V_reach_mask, label_len, label, V_pt, V_ft, start_idx, \
     E_sd, V_dt, V_num, E_mask, V_dispatch_mask, pt_dif, dt_dif, cou= zip(*batch)
 
-
     V = torch.FloatTensor(V).to(device)
     V_reach_mask = torch.BoolTensor(V_reach_mask).to(device)
 
@@ -37,7 +36,6 @@ def process_batch(batch, model, device, pad_vaule):
     V_pt = torch.FloatTensor(V_pt).to(device)
     V_ft = torch.FloatTensor(V_ft).to(device)
     start_idx = torch.LongTensor(start_idx).to(device)
-
 
     V_dt = torch.FloatTensor(V_dt).to(device)
     V_num = torch.FloatTensor(V_num).to(device)

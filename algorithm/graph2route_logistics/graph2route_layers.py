@@ -152,32 +152,3 @@ class GCNLayer(nn.Module):
         x_new = x_in + x
         e_new = e_in + e
         return x_new, e_new
-
-
-class MLP(nn.Module):
-    """Multi-layer Perceptron for output prediction.
-    """
-
-    def __init__(self, hidden_dim, output_dim, L=2):
-        super(MLP, self).__init__()
-        self.L = L
-        U = []
-        for layer in range(self.L - 1):
-            U.append(nn.Linear(hidden_dim, hidden_dim, True))
-        self.U = nn.ModuleList(U)
-        self.V = nn.Linear(hidden_dim, output_dim, True)
-
-    def forward(self, x):
-        """
-        Args:
-            x: Input features (batch_size, hidden_dim)
-
-        Returns:
-            y: Output predictions (batch_size, output_dim)
-        """
-        Ux = x
-        for U_i in self.U:
-            Ux = U_i(Ux)  # B x H
-            Ux = F.relu(Ux)  # B x H
-        y = self.V(Ux)  # B x O
-        return y

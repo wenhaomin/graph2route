@@ -175,7 +175,7 @@ def get_common_params():
     # dataset
     parser.add_argument('--min_num', type=int, default=0, help = 'minimal number of task')
     parser.add_argument('--max_num',  type=int, default=25, help = 'maxmal number of task')
-    parser.add_argument('--dataset', default='food_pd', type=str, help='food_cou or logistics')
+    parser.add_argument('--dataset', default='food_pd', type=str, help='food_pd or logistics_p')
     parser.add_argument('--pad_value', type=int, default=26, help='food servce, max node num is 25 ')
 
     ## common settings for deep models
@@ -186,14 +186,12 @@ def get_common_params():
     parser.add_argument('--wd', type=float, default=1e-5, help='weight decay (default: 1e-5)')
     parser.add_argument('--early_stop', type=int, default=10, help='early stop at')
     parser.add_argument('--workers', type=int, default=2, help='number of data loading workers (default: 4)')
-    parser.add_argument('--task', type=str, default='food', help='food_cou or logistics')
+    parser.add_argument('--task', type=str, default='food', help='food or logistics')
     parser.add_argument('--is_eval', type=str, default=False, help='True means load existing model')
     parser.add_argument('--courier_embed_dim', type = int, default=10, help = 'embed dim for courier id')
 
     #common settings for gcnru model
     parser.add_argument('--node_dim', type=int, default=8)
-    parser.add_argument('--voc_edges_in', type=int, default=3)
-    parser.add_argument('--voc_edges_out', type=int, default=2)
 
 
     return parser
@@ -230,7 +228,6 @@ def train_val_test(train_loader, val_loader, test_loader, model, device, process
             ave_loss = None
             model.train()
             for i, batch in enumerate(t):
-                #if i > 5: break
                 pred, loss = process_batch(batch, model, device, params['pad_value'])
 
                 if ave_loss is None:

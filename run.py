@@ -29,7 +29,7 @@ if __name__ == "__main__":
     params = vars(get_params())
 
     args_lst = []
-    for model in ['graph2route_logistics']:
+    for model in ['graph2route_pd']:
         for max_num in [25]:
             if model in ['graph2route_pd','graph2route_logistics']:
                 for hs in [8]:

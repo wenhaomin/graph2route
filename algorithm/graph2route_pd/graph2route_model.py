@@ -25,7 +25,6 @@ class GCNRU(nn.Module):
         self.start_fea_dim = config.get('start_fea_dim', 5)
         self.num_couv = 1000
         self.cou_embed_dim = config.get('courier_embed_dim', 10)
-        self.voc_edges_in = config['voc_edges_in']
         self.config = config
 
         self.gru_node_linear = nn.Linear(self.gcn_hidden_dim * self.max_nodes, self.gru_node_hidden_dim)
@@ -146,7 +145,7 @@ class GCNRU(nn.Module):
         batch_inputs = torch.cat(
             [batch_node_h.reshape(B * T, N, self.gcn_hidden_dim), batch_V_val.reshape(B * T, N, self.node_dim),
              batch_V_dy.reshape(B * T, N, self.dynamic_feature_dim)], dim=2). \
-            permute(1, 0, 2).contiguous().clone()#
+            permute(1, 0, 2).contiguous().clone()
 
         batch_enc_h = torch.cat(
             [batch_node_h.reshape(B * T, N, self.gcn_hidden_dim), batch_V_val.reshape(B * T, N, self.node_dim),

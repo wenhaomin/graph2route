@@ -26,23 +26,19 @@ class Attention(nn.Module):
             ref: the set of hidden states from the encoder.
                 sourceL x batch x hidden_dim
         """
-        # ref is now [batch_size x hidden_dim x sourceL]
-        ref = ref.permute(1, 2, 0)  # (64, 512, 25)
-        q = self.project_query(query).unsqueeze(2)  # batch x dim x 1, 将query映射到高维hidden_dim，方便做attention
-        e = self.project_ref(ref)  # batch_size x hidden_dim x sourceL (64,512,25)
-        # expand the query by sourceL
-        # batch x dim x sourceL
-        expanded_q = q.repeat(1, 1, e.size(2))  # (64, 512, 25) 将query第三维复制到最大长度
-        # batch x 1 x hidden_dim
+
+        ref = ref.permute(1, 2, 0)
+        q = self.project_query(query).unsqueeze(2)
+        e = self.project_ref(ref)
+        expanded_q = q.repeat(1, 1, e.size(2))
         v_view = self.v.unsqueeze(0).expand(
-            expanded_q.size(0), len(self.v)).unsqueeze(1)  # 参数，(64, 1, 512)
-        # [batch_size x 1 x hidden_dim] * [batch_size x hidden_dim x sourceL]
-        u = torch.bmm(v_view, self.tanh(expanded_q + e)).squeeze(1)  # (B, maxlen)
+            expanded_q.size(0), len(self.v)).unsqueeze(1)
+        u = torch.bmm(v_view, self.tanh(expanded_q + e)).squeeze(1)
         if self.use_tanh:
             logits = self.C * self.tanh(u)
         else:
             logits = u
-        return e, logits  # e: (64, 512, 25), logits: (64, 25)
+        return e, logits
 
 class Decoder(nn.Module):
     def __init__(self,
@@ -72,32 +68,32 @@ class Decoder(nn.Module):
 
     def check_mask(self, mask_):
         def mask_modify(mask):
-            all_true = mask.all(1)  # 一条路线中，不能再继续走了，全为True，此时mask中该路线返回值为True
-            mask_mask = torch.zeros_like(mask)  # mask_mask 初始化时全为false
-            mask_mask[:, -1] = all_true  # 如果该路线走完了，该路线对应的all_true值为true, mask_mask[: , -1]=true 否则为false，mask_mask[: , -1]=flase
+            all_true = mask.all(1)
+            mask_mask = torch.zeros_like(mask)
+            mask_mask[:, -1] = all_true
             return mask.masked_fill(mask_mask, False)
         return mask_modify(mask_)
 
     def update_mask(self, mask, selected):
         def mask_modify(mask):
 
-            all_true = mask.all(1)#一条路线中，不能再继续走了，全为True，此时mask中该路线返回值为True
+            all_true = mask.all(1)
             mask_mask = torch.zeros_like(mask)
-            mask_mask[:, -1] = all_true#如果该路线走完了，该路线对应的all_true值为true, mask_mask[: , -1]=true 否则为false，mask_mask[: , -1]=flase
-            return mask.masked_fill(mask_mask, False)#如果一条路线不能走了(全为true),则该路线对应的all_true为true, mask_mask最后一位是true，其余为false，将mask中最后一位填充为true
+            mask_mask[:, -1] = all_true
+            return mask.masked_fill(mask_mask, False)
 
-        result_mask = mask.clone().scatter_(1, selected.unsqueeze(-1), True)#将输出索引位置的mask由False 变为 True
+        result_mask = mask.clone().scatter_(1, selected.unsqueeze(-1), True)
         return mask_modify(result_mask)
 
-    def recurrence(self, x, h_in, prev_mask, prev_idxs, step, context, embed_cou, V_decode_mask):
+    def recurrence(self, x, h_in, prev_mask, prev_idxs, context, embed_cou, V_decode_mask):
         logit_mask = self.update_mask(prev_mask, prev_idxs) if prev_idxs is not None else prev_mask
-        if prev_idxs == None:#如果是第一步
+        if prev_idxs == None:
             logit_mask = self.check_mask(logit_mask)
 
         logits, h_out = self.calc_logits(x, h_in, logit_mask, context, embed_cou, V_decode_mask, self.mask_glimpses, self.mask_logits)
 
-        log_p = torch.log_softmax(logits, dim=1)  # 输出完之后，将最后一个位置变成0
-        probs = log_p.exp()  # 将最后一个位置变成pad值
+        log_p = torch.log_softmax(logits, dim=1)
+        probs = log_p.exp()
 
         if not self.mask_logits:
 
@@ -113,21 +109,17 @@ class Decoder(nn.Module):
 
         if mask_logits is None:
             mask_logits = self.mask_logits
-        # print('x shape:', x.shape, 'h_in shape',h_in[0].shape)
         hy, cy = self.lstm(x, h_in)
-        #cat(hy, cou_fea) hy表示当前解码状态，与worker的表示拼接(id embed, v, maxload, level) work的表示
         g_l = self.merge_linear(torch.cat([hy, embed_cou], dim=1))
-        h_out = (hy, cy)  # hy:(bs, hidden_size),  cy:(bs, hidden_size)
-        # decoder前步隐藏状态(第0步用lstm encoder的隐藏状态)和上一步输出位置的表示(第0步用全0）->lstmcell-> g_l(图中的h_i), 与context做attention
+        h_out = (hy, cy)
         for i in range(self.n_glimpses):
-            ref, logits = self.glimpse(g_l, context)  # (64, 512, 25), (B, maxlen)
-            # For the glimpses, only mask before softmax so we have always an L1 norm 1 readout vector
+            ref, logits = self.glimpse(g_l, context)
             if mask_glimpses:
-                logits[logit_mask] = -np.inf  # 对logits中的元素做mask，如果在之前时间步已经输出，则logit_mask中值为True，logits中值为-np.inf
+                logits[logit_mask] = -np.inf
                 logits[V_decode_mask] = -np.inf
 
-            g_l = torch.bmm(ref, self.sm(logits).unsqueeze(2)).squeeze(2)  # 再乘以去掉不合理位置加上归一化后的各位置的概率
-        _, logits = self.pointer(g_l, context)  # g_l 为通过LSTMCell后的x{t+1}, context为Encoder的隐藏状态
+            g_l = torch.bmm(ref, self.sm(logits).unsqueeze(2)).squeeze(2)
+        _, logits = self.pointer(g_l, context)
 
         # Masking before softmax makes probs sum to one
         if mask_logits:
@@ -150,22 +142,19 @@ class Decoder(nn.Module):
         return V_decode_mask_
 
     def forward(self, decoder_input, embedded_inputs, hidden, context,
-                V_reach_mask_t, node_h, V_val_masked, embed_cou, V_decode_mask, batch_masked_E):
-
-        #在之后的step中，decoder_input从embedded_inputs选
+                V_reach_mask_t, embed_cou, V_decode_mask, batch_masked_E):
 
         B = V_reach_mask_t.size()[0]
         outputs = []
         selections = []
-        steps = range(embedded_inputs.size(0))  # 遍历每一个样本轨迹序列中的25个待揽收订单
+        steps = range(embedded_inputs.size(0))
         idxs = None
         mask = Variable(V_reach_mask_t, requires_grad=False)  # (B, maxlen)
         for i in steps:
-            # 解码器中，每一步都过Attention_based recurrent decoder
 
-            hidden, log_p, probs, mask = self.recurrence(decoder_input, hidden, mask, idxs, i,
+            hidden, log_p, probs, mask = self.recurrence(decoder_input, hidden, mask, idxs,
                                                          context, embed_cou, V_decode_mask[:, i, :])
-            # select the next inputs for the decoder [batch_size x hidden_dim]
+
             idxs = self.decode(
                 probs,
                 mask

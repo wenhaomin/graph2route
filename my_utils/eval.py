@@ -123,7 +123,6 @@ def route_acc(pred, label, top_n):
     for i in range(eval_num):# which means the sub route should be totally correct.
         if not pred[i] == label[i]: return 0
     return 1
-    # return 1 if pred == label else 0
 
 
 def location_deviation(pred, label, label_len, mode='square'):

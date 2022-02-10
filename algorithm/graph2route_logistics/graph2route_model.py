@@ -1,10 +1,8 @@
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
-from algorithm.graph2route_logistics.graph2route_layers import GCNLayer, MLP
+from algorithm.graph2route_logistics.graph2route_layers import GCNLayer
 from algorithm.graph2route_logistics.step_decode import Decoder
-# from algorithm.gcnru_logistics.gcn_layer import GCN_Layer
 import time
 
 class Graph2Route(nn.Module):
@@ -14,10 +12,8 @@ class Graph2Route(nn.Module):
 
         self.batch_size = config['batch_size']
         self.max_nodes = config['max_num']
-        self.node_dim = config.get('node_dim', 9)
+        self.node_dim = config.get('node_dim', 8)
         self.dynamic_feature_dim = config.get('dynamic_feature_dim', 2)
-        self.voc_edges_in = config.get('voc_edges_in', 2)
-        self.voc_edges_out = config.get('voc_edges_out',2)
 
         self.gcn_hidden_dim = config['hidden_size']
         self.gru_node_hidden_dim = config['hidden_size']
@@ -31,10 +27,6 @@ class Graph2Route(nn.Module):
         self.cou_embed_dim = config.get('courier_embed_dim', 10)
         self.config = config
         self.cou_embed = nn.Embedding(self.num_couv, self.cou_embed_dim)
-
-        self.gru_node_linear = nn.Linear(self.gcn_hidden_dim * self.max_nodes, self.gru_node_hidden_dim)
-        self.gru_edge_linear = nn.Linear(self.gcn_hidden_dim * self.max_nodes * self.max_nodes,
-                                         self.gru_edge_hidden_dim)
 
         self.nodes_embedding = nn.Linear(self.node_dim, self.gcn_hidden_dim, bias=False)
         self.edges_values_embedding = nn.Linear(4, self.gcn_hidden_dim, bias=False)
@@ -59,10 +51,10 @@ class Graph2Route(nn.Module):
         )
 
 
-    def forward(self, V, V_reach_mask, label_len, label, V_dispatch_mask, E_abs_dis, E_dis,
-                E_pt_dif, E_dt_dif, start_fea, E_mask, V_len, cou_fea, V_decode_mask):
+    def forward(self, V, V_reach_mask, E_abs_dis, E_dis,
+                E_pt_dif, E_dt_dif, start_fea, E_mask, cou_fea, V_decode_mask):
 
-        B, N, H = V_reach_mask.shape[0], V_reach_mask.shape[2], self.gcn_hidden_dim  # batch size, num nodes, gcn hidden dim
+        B, N, H = V_reach_mask.shape[0], V_reach_mask.shape[2], self.gcn_hidden_dim  # batch size, num nodes, gcn hidden dim todo:gcn_hidden_dim-> hidden_size
         T, node_h, edge_h = V_reach_mask.shape[1], None, None
         # batch input
         batch_decoder_input = torch.zeros([B, T, self.gcn_hidden_dim + self.node_dim]).to(self.device)
@@ -74,7 +66,7 @@ class Graph2Route(nn.Module):
         batch_node_h = torch.zeros([B, T, N, self.gcn_hidden_dim]).to(self.device)
         batch_edge_h = torch.zeros([B, T, N, N, self.gcn_hidden_dim]).to(self.device)
         batch_masked_E = torch.zeros([B, T, N, N]).to(self.device)
-        cou = torch.repeat_interleave(cou_fea.unsqueeze(1), repeats=T, dim = 1).reshape(B * T, -1)#(B * T, 4)
+        cou = torch.repeat_interleave(cou_fea.unsqueeze(1), repeats=T, dim = 1).reshape(B * T, -1)
         cou_id = cou[:, 0].long()
         embed_cou = torch.cat([self.cou_embed(cou_id), cou[:, 1].unsqueeze(1)], dim=1)#(B*T, 13)
 
@@ -123,8 +115,7 @@ class Graph2Route(nn.Module):
                 batch_inputs.reshape(N, T * B, self.gcn_hidden_dim + self.node_dim),
                 (batch_init_hx, batch_init_cx),
                 batch_enc_h.reshape(N, T * B, self.gcn_hidden_dim + self.node_dim),
-                batch_V_reach_mask, batch_node_h.reshape(B * T, N, self.gcn_hidden_dim),
-                V.reshape(B * T, N, self.node_dim), embed_cou, V_decode_mask.reshape(B*T, N, N),
+                batch_V_reach_mask, embed_cou, V_decode_mask.reshape(B*T, N, N),
                 masked_E.reshape(B * T, N, N))
 
         return pointer_log_scores.exp(), pointer_argmax
@@ -138,7 +129,6 @@ class Graph2Route(nn.Module):
 
 # --Dataset
 from torch.utils.data import Dataset
-
 
 class Graph2RouteDataset(Dataset):
     def __init__(
@@ -156,7 +146,6 @@ class Graph2RouteDataset(Dataset):
         # print('self data order dict', len(self.data['order_dict']))
 
     def __len__(self):
-        # return len(self.data['max_nodes_num'])
 
         return len(self.data['V_len'])
 
@@ -169,29 +158,24 @@ class Graph2RouteDataset(Dataset):
 
         V = self.data['V'][index]
         V_reach_mask = self.data['V_reach_mask'][index]
-        V_dispatch_mask = self.data['V_dispatch_mask'][index]
 
         E_mask = self.data['E_mask'][index]
         label = self.data['label'][index]
         label_len = self.data['label_len'][index]
-        V_len = self.data['V_len'][index]
+
         start_fea = self.data['start_fea'][index]
         start_idx = self.data['start_idx'][index]
         cou_fea = self.data['cou_fea'][index]
-        past_x = self.data['past_x'][index]
         V_decode_mask = self.data['V_decode_mask'][index]
 
-
-        return  E_abs_dis, E_dis, E_pt_dif, E_dt_dif, V, V_reach_mask, V_dispatch_mask, \
-                E_mask, label, label_len, V_len, start_fea, start_idx, cou_fea, V_decode_mask
-
-
+        return  E_abs_dis, E_dis, E_pt_dif, E_dt_dif, V, V_reach_mask, \
+                E_mask, label, label_len, start_fea, start_idx, cou_fea, V_decode_mask
 
 # ---Log--
 from my_utils.utils import save2file_meta
 def save2file(params):
     from my_utils.utils import ws
-    file_name = ws + f'/output/output_1_29/{params["model"]}.csv'
+    file_name = ws + f'/output/logistics_p/{params["model"]}.csv'
     # 写表头
     head = [
         # data setting
