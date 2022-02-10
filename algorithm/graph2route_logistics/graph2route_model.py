@@ -62,7 +62,7 @@ class Graph2Route(nn.Module):
     def forward(self, V, V_reach_mask, label_len, label, V_dispatch_mask, E_abs_dis, E_dis,
                 E_pt_dif, E_dt_dif, start_fea, E_mask, V_len, cou_fea, V_decode_mask):
 
-        B, N, H = V_reach_mask.shape[0], V_reach_mask.shape[2], self.gcn_hidden_dim  # batch size, num nodes, gcn hidden dim todo:gcn_hidden_dim-> hidden_size
+        B, N, H = V_reach_mask.shape[0], V_reach_mask.shape[2], self.gcn_hidden_dim  # batch size, num nodes, gcn hidden dim
         T, node_h, edge_h = V_reach_mask.shape[1], None, None
         # batch input
         batch_decoder_input = torch.zeros([B, T, self.gcn_hidden_dim + self.node_dim]).to(self.device)
