@@ -53,7 +53,7 @@ class Decoder(nn.Module):
         self.mask_logits = mask_logits
         self.use_tanh = use_tanh
         self.tanh_exploration = tanh_exploration
-        self.decode_type = 'greedy'  # Needs to be set explicitly before use
+        self.decode_type = 'greedy'
 
         self.lstm = nn.LSTMCell(embedding_dim, hidden_dim)
         self.pointer = Attention(hidden_dim, use_tanh=use_tanh, C=tanh_exploration)
@@ -141,18 +141,24 @@ class Decoder(nn.Module):
 
         return logits, h_out
 
-    def update_decode_mask(self, idxs, K_mask, E_sd_t_masked, B, i, mask):
-        E_sd_dif = torch.gather(E_sd_t_masked.permute(1, 0, 2).contiguous(), 0, idxs.
-                                    view(1, B, 1).expand(1, B, E_sd_t_masked.size()[2])).squeeze(0)  # (B * T, N)
-
-        valid_sample_index = tuple((torch.sum(((mask == False) + 0), dim=1) >= 3).nonzero().squeeze(1).tolist())
+    def update_decode_mask(self, idxs, K_mask, E_sd_t_masked, B, i, mask, config):
+        E_sd_dif = torch.gather(E_sd_t_masked.permute(1, 0, 2).contiguous(), 0, idxs.view(1, B, 1).expand(1, B, E_sd_t_masked.size()[2])).squeeze(0)
+        valid_sample_index = tuple((torch.sum(((mask == False) + 0), dim=1) > config['k_min_nodes']).nonzero().squeeze(1).tolist())#mask when there're at least k unfinished tasks
         if len(valid_sample_index) == 0:
             return K_mask
         else:
-            max_dis_idx = tuple(
-                torch.argmax(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).squeeze(1), dim=1).tolist())
-            K_mask_ = K_mask.clone()
-            K_mask_[:, i, :][valid_sample_index, max_dis_idx] = True
+            if config['k_nearest neighbors'] == 'n-1':
+                max_dis_idx = tuple(torch.argmax(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).squeeze(1), dim=1).tolist())
+                K_mask_ = K_mask.clone()
+                K_mask_[:, i, :][valid_sample_index, max_dis_idx] = True
+            elif config['k_nearest neighbors'] == 'n-2':
+                max_dis_idx_1 = tuple(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim= 1)[1][:, 0].tolist())
+                max_dis_idx_2 = tuple(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim=1)[1][:, 1].tolist())
+                K_mask_ = K_mask.clone()
+                K_mask_[:, i, :][valid_sample_index, max_dis_idx_1] = True
+                K_mask_[:, i, :][valid_sample_index, max_dis_idx_2] = True
+            else:
+                assert False, "Unknown decode type"
 
             return K_mask_
 
@@ -176,22 +182,22 @@ class Decoder(nn.Module):
         return decoder_input, context
 
     def forward(self, decoder_input, embedded_inputs, hidden, context, V_reach_mask_t, node_h,
-                V_val_masked, E_ed_t_masked, E_sd_t_masked, embed_cou, start_idx):
+                V_val_masked, E_ed_t_masked, E_sd_t_masked, embed_cou, start_idx, config):
 
         B = V_reach_mask_t.size()[0]
         N = V_reach_mask_t.size()[1]
         outputs = []
         selections = []
         steps = range(embedded_inputs.size(0))
-        mask = Variable(V_reach_mask_t, requires_grad=False)  # (B, maxlen)
+        mask = Variable(V_reach_mask_t, requires_grad=False)
         idxs = start_idx
-        K_mask = torch.BoolTensor(np.full([B, N, N], False)).to(decoder_input.device)
+        K_mask = torch.BoolTensor(np.full([B, N, N], False)).to(decoder_input.device)#knn mask at each step
         for i in steps:
-            K_mask = self.update_decode_mask(idxs, K_mask, E_sd_t_masked, B, i, mask)
+            K_mask = self.update_decode_mask(idxs, K_mask, E_sd_t_masked, B, i, mask, config)
 
             hidden, log_p, probs, mask = self.recurrence(decoder_input, hidden, mask,
                                                          idxs, i, context, embed_cou, K_mask[:, i, :])
-            # select the next inputs for the decoder [batch_size x hidden_dim]
+            # select the next inputs for the decoder
             idxs = self.decode(
                 probs,
                 mask

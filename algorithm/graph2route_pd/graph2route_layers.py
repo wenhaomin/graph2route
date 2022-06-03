@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
+import numpy as np
+
 
 class BatchNormNode(nn.Module):
 
@@ -69,8 +71,6 @@ class EdgeFeatures(nn.Module):
 
 
 class GCNLayer(nn.Module):
-    """Convnet layer with gating and residual connection.
-    """
 
     def __init__(self, hidden_dim, aggregation="sum"):
         super(GCNLayer, self).__init__()
@@ -80,15 +80,7 @@ class GCNLayer(nn.Module):
         self.bn_edge = BatchNormEdge(hidden_dim)
 
     def forward(self, x, e):
-        """
-        Args:
-            x: Node features (batch_size, num_nodes, hidden_dim)
-            e: Edge features (batch_size, num_nodes, num_nodes, hidden_dim)
 
-        Returns:
-            x_new: Convolved node features (batch_size, num_nodes, hidden_dim)
-            e_new: Convolved edge features (batch_size, num_nodes, num_nodes, hidden_dim)
-        """
         e_in = e
         x_in = x
         # Edge convolution

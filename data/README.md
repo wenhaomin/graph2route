@@ -1,1 +1,1 @@
-Two datasets are provide here, including Logistic-P and Food-PD. 
+Two datasets are provide here, including Logistics and Food-PD. 

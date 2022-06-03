@@ -6,43 +6,15 @@ import torch
 import math
 
 """
-Evaluation Function
+Metrics
 """
 
 
-# For eta task
-def eta_eval(pred, label, metric='mae'):
-    mask = label > 0
-    label = label.masked_select(mask)
-    pred = pred.masked_select(mask)
-    if metric == 'mae': result = nn.L1Loss()(pred, label).item()
-    if metric == 'mse': result = nn.MSELoss()(pred, label).item()
-    if metric == 'rmse':
-        mse = nn.MSELoss()(pred, label).item()
-        result = np.sqrt(mse)
-    if metric == 'mape': result = torch.abs((pred - label) / label).mean().item()
-    if 'acc' in metric:  # calculate the Hit@10min, Hit@20min
-        k = int(metric.split('@')[1])
-        tmp = torch.abs(pred - label) < k
-        result = torch.sum(tmp).item() / tmp.shape[0]
-        #result = result * 100
-    n = mask.sum().item()
-    return result, n
-
-
-# For sorting task
 def hit_rate(pred, label, lab_len, top_n=3):
     """
-    Get the top-n hit rate of the prediction
-    :param lab_len:
-    :param pred:
-    :param label:
-    :param top_n:
-    :return:
+    calculate Hit-Rate@k (HR@k)
     """
-    # label_len = get_label_len(label)
-    label_len = lab_len
-    eval_num = min(top_n, label_len)
+    eval_num = min(top_n, lab_len)
     hit_num = len(set(pred[:eval_num]) & set(label[:eval_num]))
     hit_rate = hit_num / eval_num
     return hit_rate
@@ -50,17 +22,8 @@ def hit_rate(pred, label, lab_len, top_n=3):
 
 def kendall_rank_correlation(pred, label, label_len):
     """
-    caculate the kendall rank correlation between pred and label, note that label set is contained in the pred set
-    :param label_len:
-    :param pred:
-    :param label:
-    :return:
+    caculate  kendall rank correlation (KRC), note that label set is a subset of pred set
     """
-    # print('pred:', pred)
-    # print('label:', label)
-    # print('label len:', label_len)
-
-
     def is_concordant(i, j):
         return 1 if (label_order[i] < label_order[j] and pred_order[i] < pred_order[j]) or (
                 label_order[i] > label_order[j] and pred_order[i] > pred_order[j]) else 0
@@ -74,7 +37,6 @@ def kendall_rank_correlation(pred, label, label_len):
     label_order = {d: idx for idx, d in enumerate(label)}
     for o in not_in_label:
         label_order[o] = len(label)
-    # print('label order:', label_order)
 
     n = len(label)
     # compare list 1: compare items between labels
@@ -85,16 +47,9 @@ def kendall_rank_correlation(pred, label, label_len):
     try:
         hit_lst = [is_concordant(i, j) for i, j in (lst1 + lst2)]
     except:
-        print('pred:', pred)
-        print('label:', label)
-        print('label len:', label_len)
-        print('-' * 40)
+        print('[warning]: wrong in calculate KRC')
         return float(1)
-        # hit_list = [0 for i, j in (lst1 + lst2)]
 
-
-    # hit_lst = [is_concordant(i, j) for i, j in (lst1 + lst2)]
-    # todo_: add the weight here
     hit = sum(hit_lst)
     not_hit = len(hit_lst) - hit
     result = (hit - not_hit) / (len(lst1) + len(lst2))
@@ -115,6 +70,9 @@ def idx_weight(i, mode='linear'):
 
 
 def route_acc(pred, label, top_n):
+    """
+    calculate ACC@k
+    """
     assert set(label).issubset(set(pred)), f"error in prediction:{pred}, label:{label}"
     eval_num = min(top_n, len(label))
     pred = pred[:eval_num]
@@ -126,7 +84,12 @@ def route_acc(pred, label, top_n):
 
 
 def location_deviation(pred, label, label_len, mode='square'):
-    # label = label[:get_label_len(label)]
+    """
+    calculate LSD / LMD
+    mode:
+       'square', The Location Square Deviation (LSD)
+        else:    The Location Mean Deviation (LMD)
+    """
     label = label[:label_len]
 
     n = len(label)
@@ -149,13 +112,14 @@ def location_deviation(pred, label, label_len, mode='square'):
 # https://blog.csdn.net/dcrmg/article/details/79228589
 # https://github.com/belambert/edit-distance
 def edit_distance(pred, label):
+    """
+    calculate edit distance (ED)
+    """
     import edit_distance
     assert set(label).issubset(set(pred)), "error in prediction"
-    # Focus on the items in label
-
+    # Focus on the items in the label
     if not isinstance(pred, list): pred = pred.tolist()
     if not isinstance(label, list): label = label.tolist()
-
     try:
          pred = [x for x in pred if x in label]
          ed = edit_distance.SequenceMatcher(pred, label).distance()
@@ -188,10 +152,8 @@ class AverageMeter(object):
 class Metric(object):
     def __init__(
             self,
-            method,
-            length_range =  [0, 5],
+            length_range,
             max_seq_len = 25,
-
     ):
         self.max_seq_len = max_seq_len
         self.hr = [AverageMeter() for _ in range(self.max_seq_len)]
@@ -200,10 +162,23 @@ class Metric(object):
         self.lmd = AverageMeter()
         self.ed = AverageMeter() #edit distance
         self.acc = [AverageMeter() for _ in range(self.max_seq_len)]
-        self.method = method
         self.len_range = length_range
 
-
+    def filter_len(self, prediction, label, label_len, input_len):
+        """
+        filter the input data,  only evalution the data within len_range
+        """
+        pred_f = []
+        label_f = []
+        label_len_f = []
+        input_len_f = []
+        for i in range(len(label_len)):
+            if self.len_range[0] <= label_len[i] <= self.len_range[1]:
+                pred_f.append(prediction[i])
+                label_f.append(label[i])
+                label_len_f.append(label_len[i])
+                input_len_f.append(input_len[i])
+        return pred_f, label_f, label_len_f, input_len_f
 
     def update(self, prediction, label, label_len, input_len)->None:
         def tensor2lst(x):
@@ -212,28 +187,13 @@ class Metric(object):
             except:
                 return x
 
-        if (self.method == 'torch') or (self.method == 'gcnru'):
-            prediction, label, label_len, input_len = [tensor2lst(x) for x in [prediction, label, label_len, input_len]]
-
-        def filter_len(prediction, label, label_len, input_len):
-            pred_f = []
-            label_f = []
-            label_len_f = []
-            input_len_f = []
-            for i in range(len(label_len)):
-                if self.len_range[0] <= label_len[i] <= self.len_range[1]:
-                    pred_f.append(prediction[i])
-                    label_f.append(label[i])
-                    label_len_f.append(label_len[i])
-                    input_len_f.append(input_len[i])
-            return pred_f, label_f, label_len_f, input_len_f
+        prediction, label, label_len, input_len = [tensor2lst(x) for x in [prediction, label, label_len, input_len]]
 
         # process the prediction
-        prediction, label, label_len, input_len = filter_len(prediction, label, label_len, input_len)
+        prediction, label, label_len, input_len = self.filter_len(prediction, label, label_len, input_len)
 
         pred = []
         for p, inp_len in zip(prediction, input_len):
-            # input = set(range(inp_len))
             input = set([x for x in p if x < len(prediction[0]) - 1])
             tmp = list(filter(lambda pi: pi in input, p))
             pred.append(tmp)
@@ -263,14 +223,11 @@ class Metric(object):
             self.acc[n].update(acc_n, batch_size)
 
 
-    def to_dict(
-            self
-    ) -> Dict:
+    def to_dict(self) -> Dict:
         result = {f'hr@{i + 1}': self.hr[i].avg for i in range(10)}
         result.update({f'acc@{i + 1}': self.acc[i].avg for i in range(10)})
         result.update({'lsd': self.lsd.avg, 'lmd': self.lmd.avg, 'krc': self.krc.avg, 'ed': self.ed.avg})
         return result
-        # return {'hr': self.hr.tolist(), 'lsd': self.lsd, 'lmd': self.lmd, 'krc': self.krc}
 
     def to_str(self):
         hr = [round(x.avg, 3) for x in self.hr]
@@ -280,19 +237,19 @@ class Metric(object):
         ed = round(self.ed.avg, 3)
         return f'krc:{krc} | lsd:{lsd} | ed:{ed} | hr@1:{hr[0]} | hr@2:{hr[1]} | hr@3:{hr[2]} | acc@1:{acc[0]} | acc@2:{acc[1]} | acc@3:{acc[2]} |'
 
-        # return f'krc:{krc} | lsd:{lsd} | hr@1:{hr[0]} | hr@2:{hr[1]} | hr@3:{hr[2]} '
-
 if __name__ == '__main__':
-    for i in range(10):
-        pred = [i for i in range(6)]
-        np.random.shuffle(pred)
-        label = [i for i in range(4)]
-        np.random.shuffle(label)
-        print('pred:', pred)
-        print('label:', label)
-        distance = edit_distance(pred, label)
+    # example
+    prediction = [4, 1, 2, 5, 3, 0]
+    label = [4,3,5,1,2,3]
+    label_len = 4 # The observation of label[:label_len] is not affected by new coming orders.
 
-        print('distance:', distance)
-        print('-' * 50)
+    print('prediction:', prediction)
+    print('label:', label)
+    print('label not affected by new orders:', label[:label_len])
 
-    pass
+    print('HR@3:' , hit_rate(prediction, label, label_len, 3))
+    print('KRC:'  , kendall_rank_correlation(prediction, label, label_len))
+    print('LSD:'  , location_deviation(prediction, label, label_len, 'square'))
+    print('LMD'   , location_deviation(prediction, label, label_len, 'mean'))
+    print('ACC@2:', route_acc(prediction, label[:label_len], 2))
+    print('ED:'   , edit_distance(prediction, label[:label_len]))

@@ -26,19 +26,23 @@ class Attention(nn.Module):
             ref: the set of hidden states from the encoder.
                 sourceL x batch x hidden_dim
         """
-
-        ref = ref.permute(1, 2, 0)
-        q = self.project_query(query).unsqueeze(2)
-        e = self.project_ref(ref)
-        expanded_q = q.repeat(1, 1, e.size(2))
+        # ref is now [batch_size x hidden_dim x sourceL]
+        ref = ref.permute(1, 2, 0)  # (64, 512, 25)
+        q = self.project_query(query).unsqueeze(2)  # batch x dim x 1, 将query映射到高维hidden_dim，方便做attention
+        e = self.project_ref(ref)  # batch_size x hidden_dim x sourceL (64,512,25)
+        # expand the query by sourceL
+        # batch x dim x sourceL
+        expanded_q = q.repeat(1, 1, e.size(2))  # (64, 512, 25) 将query第三维复制到最大长度
+        # batch x 1 x hidden_dim
         v_view = self.v.unsqueeze(0).expand(
-            expanded_q.size(0), len(self.v)).unsqueeze(1)
-        u = torch.bmm(v_view, self.tanh(expanded_q + e)).squeeze(1)
+            expanded_q.size(0), len(self.v)).unsqueeze(1)  # 参数，(64, 1, 512)
+        # [batch_size x 1 x hidden_dim] * [batch_size x hidden_dim x sourceL]
+        u = torch.bmm(v_view, self.tanh(expanded_q + e)).squeeze(1)  # (B, maxlen)
         if self.use_tanh:
             logits = self.C * self.tanh(u)
         else:
             logits = u
-        return e, logits
+        return e, logits  # e: (64, 512, 25), logits: (64, 25)
 
 class Decoder(nn.Module):
     def __init__(self,
@@ -68,32 +72,32 @@ class Decoder(nn.Module):
 
     def check_mask(self, mask_):
         def mask_modify(mask):
-            all_true = mask.all(1)
-            mask_mask = torch.zeros_like(mask)
-            mask_mask[:, -1] = all_true
+            all_true = mask.all(1)  # 一条路线中，不能再继续走了，全为True，此时mask中该路线返回值为True
+            mask_mask = torch.zeros_like(mask)  # mask_mask 初始化时全为false
+            mask_mask[:, -1] = all_true  # 如果该路线走完了，该路线对应的all_true值为true, mask_mask[: , -1]=true 否则为false，mask_mask[: , -1]=flase
             return mask.masked_fill(mask_mask, False)
         return mask_modify(mask_)
 
     def update_mask(self, mask, selected):
         def mask_modify(mask):
 
-            all_true = mask.all(1)
+            all_true = mask.all(1)#一条路线中，不能再继续走了，全为True，此时mask中该路线返回值为True
             mask_mask = torch.zeros_like(mask)
-            mask_mask[:, -1] = all_true
-            return mask.masked_fill(mask_mask, False)
+            mask_mask[:, -1] = all_true#如果该路线走完了，该路线对应的all_true值为true, mask_mask[: , -1]=true 否则为false，mask_mask[: , -1]=flase
+            return mask.masked_fill(mask_mask, False)#如果一条路线不能走了(全为true),则该路线对应的all_true为true, mask_mask最后一位是true，其余为false，将mask中最后一位填充为true
 
-        result_mask = mask.clone().scatter_(1, selected.unsqueeze(-1), True)
+        result_mask = mask.clone().scatter_(1, selected.unsqueeze(-1), True)#将输出索引位置的mask由False 变为 True
         return mask_modify(result_mask)
 
-    def recurrence(self, x, h_in, prev_mask, prev_idxs, context, embed_cou, V_decode_mask):
+    def recurrence(self, x, h_in, prev_mask, prev_idxs, step, context, embed_cou, V_decode_mask):
         logit_mask = self.update_mask(prev_mask, prev_idxs) if prev_idxs is not None else prev_mask
-        if prev_idxs == None:
+        if prev_idxs == None:#如果是第一步
             logit_mask = self.check_mask(logit_mask)
 
         logits, h_out = self.calc_logits(x, h_in, logit_mask, context, embed_cou, V_decode_mask, self.mask_glimpses, self.mask_logits)
 
-        log_p = torch.log_softmax(logits, dim=1)
-        probs = log_p.exp()
+        log_p = torch.log_softmax(logits, dim=1)  # 输出完之后，将最后一个位置变成0
+        probs = log_p.exp()  # 将最后一个位置变成pad值
 
         if not self.mask_logits:
 
@@ -113,7 +117,8 @@ class Decoder(nn.Module):
         g_l = self.merge_linear(torch.cat([hy, embed_cou], dim=1))
         h_out = (hy, cy)
         for i in range(self.n_glimpses):
-            ref, logits = self.glimpse(g_l, context)
+            ref, logits = self.glimpse(g_l, context)  # (64, 512, 25), (B, maxlen)
+
             if mask_glimpses:
                 logits[logit_mask] = -np.inf
                 logits[V_decode_mask] = -np.inf
@@ -128,21 +133,36 @@ class Decoder(nn.Module):
 
         return logits, h_out
 
-    def update_knn_mask(self, idxs, V_decode_mask, E_masked, B, current_node, mask):
+    def update_knn_mask(self, idxs, V_decode_mask, E_masked, B, current_node, mask, config):
 
-        E_masked_dif = torch.gather(E_masked.permute(1, 0, 2).contiguous(), 0, idxs.
-                                         view(1, B, 1).expand(1, B, E_masked.size()[2])).squeeze(0)#(B * T, N)
-        valid_sample_index = tuple((torch.sum(((mask == False)+0),dim=1) >=3).nonzero().squeeze(1).tolist())
+        E_masked_dif = torch.gather(E_masked.permute(1, 0, 2).contiguous(), 0, idxs.view(1, B, 1).expand(1, B, E_masked.size()[2])).squeeze(0)
+        valid_sample_index = tuple((torch.sum(((mask == False) + 0),dim=1) > config['k_min_nodes']).nonzero().squeeze(1).tolist())
         if len(valid_sample_index) == 0:
             return V_decode_mask
-        max_dis_idx = tuple(torch.argmax(((E_masked_dif * ((mask == False) + 0))[valid_sample_index,:]).squeeze(1), dim=1).tolist())
-        V_decode_mask_ = V_decode_mask.clone()
-        V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx] = True
+        else:
+            if config['k_nearest neighbors'] == 'n-1':
+                max_dis_idx = tuple(torch.argmax(((E_masked_dif * ((mask == False) + 0))[valid_sample_index, :]).squeeze(1), dim=1).tolist())
+                V_decode_mask_ =  V_decode_mask.clone()
+                V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx] = True
+            elif config['k_nearest neighbors'] == 'n-2':
+                max_dis_idx_1 = tuple(
+                    ((E_masked_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim=1)[1][:, 0].tolist())
+                max_dis_idx_2 = tuple(
+                    ((E_masked_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim=1)[1][:, 1].tolist())
+                V_decode_mask_ = V_decode_mask.clone()
+                V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx_1] = True
+                V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx_2] = True
+            else:
+                assert False, "Unknown decode type"
+
+        # max_dis_idx = tuple(torch.argmax(((E_masked_dif * ((mask == False) + 0))[valid_sample_index,:]).squeeze(1), dim=1).tolist())
+        # V_decode_mask_ = V_decode_mask.clone()
+        # V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx] = True
 
         return V_decode_mask_
 
     def forward(self, decoder_input, embedded_inputs, hidden, context,
-                V_reach_mask_t, embed_cou, V_decode_mask, batch_masked_E):
+                V_reach_mask_t, embed_cou, V_decode_mask, batch_masked_E, config):
 
         B = V_reach_mask_t.size()[0]
         outputs = []
@@ -151,16 +171,15 @@ class Decoder(nn.Module):
         idxs = None
         mask = Variable(V_reach_mask_t, requires_grad=False)  # (B, maxlen)
         for i in steps:
-
-            hidden, log_p, probs, mask = self.recurrence(decoder_input, hidden, mask, idxs,
+            hidden, log_p, probs, mask = self.recurrence(decoder_input, hidden, mask, idxs, i,
                                                          context, embed_cou, V_decode_mask[:, i, :])
-
+            # select the next inputs for the decoder [batch_size x hidden_dim]
             idxs = self.decode(
                 probs,
                 mask
             )
 
-            V_decode_mask = self.update_knn_mask(idxs, V_decode_mask, batch_masked_E, B, i, mask)
+            V_decode_mask = self.update_knn_mask(idxs, V_decode_mask, batch_masked_E, B, i, mask, config)
             decoder_input = torch.gather(
                 embedded_inputs,  # (maxlen, B, H)
                 0,
