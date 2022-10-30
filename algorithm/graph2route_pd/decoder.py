@@ -147,11 +147,11 @@ class Decoder(nn.Module):
         if len(valid_sample_index) == 0:
             return K_mask
         else:
-            if config['k_nearest neighbors'] == 'n-1':
+            if config['k_nearest_neighbors'] == 'n-1':
                 max_dis_idx = tuple(torch.argmax(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).squeeze(1), dim=1).tolist())
                 K_mask_ = K_mask.clone()
                 K_mask_[:, i, :][valid_sample_index, max_dis_idx] = True
-            elif config['k_nearest neighbors'] == 'n-2':
+            elif config['k_nearest_neighbors'] == 'n-2':
                 max_dis_idx_1 = tuple(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim= 1)[1][:, 0].tolist())
                 max_dis_idx_2 = tuple(((E_sd_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim=1)[1][:, 1].tolist())
                 K_mask_ = K_mask.clone()
@@ -181,15 +181,15 @@ class Decoder(nn.Module):
 
         return decoder_input, context
 
-    def forward(self, decoder_input, embedded_inputs, hidden, context, V_reach_mask_t, node_h,
+    def forward(self, decoder_input, embedded_inputs, hidden, context, V_reach_mask, node_h,
                 V_val_masked, E_ed_t_masked, E_sd_t_masked, embed_cou, start_idx, config):
 
-        B = V_reach_mask_t.size()[0]
-        N = V_reach_mask_t.size()[1]
+        B = V_reach_mask.size()[0]
+        N = V_reach_mask.size()[1]
         outputs = []
         selections = []
         steps = range(embedded_inputs.size(0))
-        mask = Variable(V_reach_mask_t, requires_grad=False)
+        mask = Variable(V_reach_mask, requires_grad=False)
         idxs = start_idx
         K_mask = torch.BoolTensor(np.full([B, N, N], False)).to(decoder_input.device)#knn mask at each step
         for i in steps:

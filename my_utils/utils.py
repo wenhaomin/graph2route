@@ -185,25 +185,25 @@ def get_common_params():
     parser.add_argument('--pad_value', type=int, default=26, help='food servce, max node num is 25 ')
 
     ## common settings for deep models
-    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 256)')
-    parser.add_argument('--num_epoch', type=int, default=60, help='number of epochs to train (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
+    parser.add_argument('--num_epoch', type=int, default=5, help='number of epochs to train (default: 60)')
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate (default: 1e-4)')
     parser.add_argument('--seed', type=int, default=2022, metavar='S', help='random seed (default: 6)')
     parser.add_argument('--wd', type=float, default=1e-5, help='weight decay (default: 1e-5)')
-    parser.add_argument('--early_stop', type=int, default=10, help='early stop at')
+    parser.add_argument('--early_stop', type=int, default=5, help='early stop at')
     parser.add_argument('--workers', type=int, default=2, help='number of data loading workers (default: 4)')
     parser.add_argument('--is_eval', type=str, default=False, help='True means load existing model')
-    parser.add_argument('--courier_embed_dim', type = int, default=10, help = 'embed dim for courier id')
-    parser.add_argument('--num_of_couriers in food_pd', type=int, default=920)
-    parser.add_argument('--num_of_couriers in logistics', type=int, default=2346)
+
+    parser.add_argument('--worker_emb_dim', type = int, default=10, help = 'embedding dimension of a worker')
+    parser.add_argument('--num_worker_pd', type=int, default=920, help = 'number of workers in food delivery dataset')
+    parser.add_argument('--num_worker_logistics', type=int, default=2346, help='number of workers in logistics dataset')
 
     #common settings for graph2route model
-    parser.add_argument('--node_dim', type=int, default=8)
-    parser.add_argument('--voc_edges_in', type=int, default=3)
-    parser.add_argument('--voc_edges_out', type=int, default=2)
+    parser.add_argument('--node_fea_dim', type=int, default=8, help = 'dimension of node input feature')
+    parser.add_argument('--edge_fea_dim', type=int, default=5, help = 'dimension of edge input feature')
     parser.add_argument('--hidden_size', type=int, default=8)
     parser.add_argument('--gcn_num_layers', type=int, default=2)
-    parser.add_argument('--k_nearest neighbors', type=str, default='n-1')
+    parser.add_argument('--k_nearest_neighbors', type=str, default='n-1')
     parser.add_argument('--k_min_nodes', type=int, default=3)
     # settings for evaluation
     parser.add_argument('--eval_start', type=int, default=1)
@@ -303,12 +303,12 @@ def get_nonzeros(pred_steps, label_steps, label_len, pred_len, pad_value):
            torch.LongTensor(label_len_list), torch.LongTensor(pred_len_list)
 
 def get_model_function(model):
-    import algorithm.graph2route_pd.graph2route_model as graph2route_pd
-    import algorithm.graph2route_logistics.graph2route_model as graph2route_logistics
+    import algorithm.graph2route_pd.model as graph2route_pd
+    import algorithm.graph2route_logistics.model as graph2route_logistics
 
     model_dict = {
 
-        'graph2route_pd':(graph2route_pd.GCNRU, graph2route_pd.save2file),
+        'graph2route_pd':(graph2route_pd.Graph2Route, graph2route_pd.save2file),
         'graph2route_logistics':(graph2route_logistics.Graph2Route, graph2route_logistics.save2file),
 
     }
@@ -318,6 +318,7 @@ def get_model_function(model):
 def run(params, DATASET, PROCESS_BATCH, TEST_MODEL, collate_fn = None):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.manual_seed(params.get('seed', 2022))
     params['device'] = device
     params['train_path'], params['val_path'],  params['test_path'] = get_dataset_path(params)
     pprint(params)  # print the parameters

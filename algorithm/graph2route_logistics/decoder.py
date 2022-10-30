@@ -140,11 +140,11 @@ class Decoder(nn.Module):
         if len(valid_sample_index) == 0:
             return V_decode_mask
         else:
-            if config['k_nearest neighbors'] == 'n-1':
+            if config['k_nearest_neighbors'] == 'n-1':
                 max_dis_idx = tuple(torch.argmax(((E_masked_dif * ((mask == False) + 0))[valid_sample_index, :]).squeeze(1), dim=1).tolist())
                 V_decode_mask_ =  V_decode_mask.clone()
                 V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx] = True
-            elif config['k_nearest neighbors'] == 'n-2':
+            elif config['k_nearest_neighbors'] == 'n-2':
                 max_dis_idx_1 = tuple(
                     ((E_masked_dif * ((mask == False) + 0))[valid_sample_index, :]).topk(2, dim=1)[1][:, 0].tolist())
                 max_dis_idx_2 = tuple(
@@ -154,10 +154,6 @@ class Decoder(nn.Module):
                 V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx_2] = True
             else:
                 assert False, "Unknown decode type"
-
-        # max_dis_idx = tuple(torch.argmax(((E_masked_dif * ((mask == False) + 0))[valid_sample_index,:]).squeeze(1), dim=1).tolist())
-        # V_decode_mask_ = V_decode_mask.clone()
-        # V_decode_mask_[:, current_node + 1, :][valid_sample_index, max_dis_idx] = True
 
         return V_decode_mask_
 

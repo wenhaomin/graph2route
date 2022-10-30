@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
-import argparse
-import torch
-
 from my_utils.eval import *
 import torch.nn.functional as F
 # os.environ['MKL_SERVICE_FORCE_INTEL']='1'
@@ -12,7 +8,7 @@ from tqdm import  tqdm
 from my_utils.eval import Metric
 from my_utils.utils import run, dict_merge
 from my_utils.utils import get_nonzeros
-from algorithm.graph2route_pd.graph2route_model import GCNRUDataset
+from algorithm.graph2route_pd.model import Graph2RouteDataset
 
 def collate_fn(batch):
     return batch
@@ -20,6 +16,23 @@ def collate_fn(batch):
 def process_batch(batch, model, device, pad_vaule):
     E_ed, V, V_reach_mask, label_len, label, V_pt, V_ft, start_idx, \
     E_sd, V_dt, V_num, E_mask, V_dispatch_mask, pt_dif, dt_dif, cou, A= zip(*batch)
+    E_ed = np.array(E_ed)
+    E_sd = np.array(E_sd)
+    pt_dif = np.array(pt_dif)
+    dt_dif = np.array(dt_dif)
+    label = np.array(label)
+    E_mask = np.array(E_mask)
+    A = np.array(A)
+    E = np.zeros([label.shape[0], label.shape[1], E_ed.shape[1], E_ed.shape[2], 5])
+    for t in range(label.shape[1]):
+        E_mask_t = E_mask[:, t, :, :]
+        E_ed_dif_t = (E_ed * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2],  1])
+        E_sd_dif_t = (E_sd * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+        E_pt_t = (pt_dif * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+        E_dt_t = (dt_dif * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+        A_t = (A[:, t, :, :] * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+        E_t = np.concatenate([E_ed_dif_t, E_sd_dif_t, E_pt_t, E_dt_t, A_t], axis=3)
+        E[:, t, :, :, :] = E_t
 
 
     V = torch.FloatTensor(V).to(device)
@@ -38,13 +51,10 @@ def process_batch(batch, model, device, pad_vaule):
     V_dispatch_mask = torch.FloatTensor(V_dispatch_mask).to(device)
     E_ed = torch.FloatTensor(E_ed).to(device)
     E_sd = torch.FloatTensor(E_sd).to(device)
-    E_pt_dif = torch.FloatTensor(pt_dif).to(device)
-    E_dt_dif = torch.FloatTensor(dt_dif).to(device)
     cou = torch.LongTensor(cou).to(device)
-    A = torch.FloatTensor(A).to(device)
-    pred_scores, pred_pointers = model.forward(E_ed, V, V_reach_mask, V_pt, E_sd, V_ft,
-                                               start_idx, V_dt, V_num, np.array(E_mask), V_dispatch_mask, E_pt_dif,
-                                               E_dt_dif, cou, A)
+    E = torch.FloatTensor(E).to(device)
+    pred_scores, pred_pointers = model.forward(V, V_reach_mask, V_ft, V_pt, V_dt, V_num, V_dispatch_mask, E, E_ed,  E_sd, np.array(E_mask), start_idx, cou)
+
     unrolled = pred_scores.view(-1, pred_scores.size(-1))
     loss = F.cross_entropy(unrolled, label.view(-1), ignore_index=pad_vaule)
     return pred_pointers, loss
@@ -59,6 +69,23 @@ def test_model(model, test_dataloader, device, pad_value, params, save2file, mod
         for batch in tqdm(test_dataloader):
             E_ed, V, V_reach_mask, label_len, label, V_pt, V_ft, start_idx, \
             E_sd, V_dt, V_num, E_mask, V_dispatch_mask, pt_dif, dt_dif, cou, A= zip(*batch)
+            E_ed = np.array(E_ed)
+            E_sd = np.array(E_sd)
+            pt_dif = np.array(pt_dif)
+            dt_dif = np.array(dt_dif)
+            label = np.array(label)
+            E_mask = np.array(E_mask)
+            A = np.array(A)
+            E = np.zeros([label.shape[0], label.shape[1], E_ed.shape[1], E_ed.shape[2], 5])
+            for t in range(label.shape[1]):
+                E_mask_t = E_mask[:, t, :, :]
+                E_ed_dif_t = (E_ed * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+                E_sd_dif_t = (E_sd * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+                E_pt_t = (pt_dif * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+                E_dt_t = (dt_dif * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+                A_t = (A[:, t, :, :] * E_mask_t).reshape([E_ed.shape[0], E_ed.shape[1], E_ed.shape[2], 1])
+                E_t = np.concatenate([E_ed_dif_t, E_sd_dif_t, E_pt_t, E_dt_t, A_t], axis=3)
+                E[:, t, :, :, :] = E_t
 
             V = torch.FloatTensor(V).to(device)
             label_len = torch.LongTensor(label_len).to(device)
@@ -75,13 +102,10 @@ def test_model(model, test_dataloader, device, pad_value, params, save2file, mod
             V_reach_mask = torch.BoolTensor(V_reach_mask).to(device)
             E_ed = torch.FloatTensor(E_ed).to(device)
             E_sd = torch.FloatTensor(E_sd).to(device)
-            E_pt_dif = torch.FloatTensor(pt_dif).to(device)
-            E_dt_dif = torch.FloatTensor(dt_dif).to(device)
             cou = torch.LongTensor(cou).to(device)
-            A = torch.FloatTensor(A).to(device)
+            E = torch.FloatTensor(E).to(device)
 
-            pred_scores, pred_pointers = model.forward(E_ed, V, V_reach_mask, V_pt, E_sd, V_ft, start_idx, V_dt,
-                                        V_num, np.array(E_mask), V_dispatch_mask, E_pt_dif, E_dt_dif, cou, A)
+            pred_scores, pred_pointers = model(V, V_reach_mask, V_ft, V_pt, V_dt, V_num, V_dispatch_mask, E, E_ed,  E_sd, np.array(E_mask), start_idx, cou)
 
             N = pred_pointers.size(-1)
             pred_len = torch.sum((pred_pointers.reshape(-1, N) < N - 1) + 0, dim=1)
@@ -110,7 +134,7 @@ def test_model(model, test_dataloader, device, pad_value, params, save2file, mod
         return evaluator_2
 
 def main(params):
-    run(params, GCNRUDataset, process_batch, test_model,collate_fn)
+    run(params, Graph2RouteDataset, process_batch, test_model,collate_fn)
 
 def get_params():
     from my_utils.utils import get_common_params
