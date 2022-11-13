@@ -69,9 +69,9 @@ class Graph2Route(nn.Module):
         d_h, d_v = self.d_h, self.d_v
 
         # batch input
-        b_decoder_input = torch.zeros([B, T, d_h + d_h]).to(self.device)
-        b_init_hx = torch.randn(B * T, d_h + d_h).to(self.device)
-        b_init_cx = torch.randn(B * T, d_h + self.d_v).to(self.device)
+        b_decoder_input = torch.zeros([B, T, d_h + d_v]).to(self.device)
+        b_init_hx = torch.randn(B * T, d_h + d_v).to(self.device)
+        b_init_cx = torch.randn(B * T, d_h + d_v).to(self.device)
 
         b_V_reach_mask = V_reach_mask.reshape(B * T, N)
 
